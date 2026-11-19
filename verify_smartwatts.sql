@@ -1,4 +1,3 @@
--- Diagnóstico: executar no SQL Editor após database.sql
 select table_name from information_schema.tables
 where table_schema = 'public' and table_name in ('sw_settings', 'sw_locations', 'sw_readings')
 order by table_name;

@@ -1,183 +1,256 @@
-/**
- * Cliente Supabase para o SmartWatts.
- * Usa as APIs oficiais Auth e PostgREST (fetch nativo), sem dependências externas.
- * Somente a chave pública/publishable deve ser usada aqui.
- */
-const SESSION_KEY = 'smartwatts-supabase-session-v1';
-
-export class SupabaseAPI {
+const CHAVE_SESSAO = 'smartwatts-supabase-session-v1';
+export class Banco {
   constructor(config = {}) {
-    this.url = String(config.url || '').trim().replace(/\/+$/, '');
-    this.key = String(config.publishableKey || '').trim();
-    this.session = null;
-    this.refreshing = null;
+    this.url = String(config.url || '')
+      .trim()
+      .replace(/\/+$/, '');
+    this.chave = String(config.publishableKey || '').trim();
+    this.sessao = null;
+    this.renovando = null;
   }
-
-  get configured() {
+  get configurado() {
     try {
       const url = new URL(this.url);
-      let publicKey = this.key.startsWith('sb_publishable_');
-      if (!publicKey) {
-        try { publicKey = JSON.parse(atob(this.key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role === 'anon'; } catch {}
+      let chavePublica = this.chave.startsWith('sb_publishable_');
+      if (!chavePublica) {
+        try {
+          chavePublica =
+            JSON.parse(atob(this.chave.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+              .role === 'anon';
+        } catch {}
       }
-      return url.protocol === 'https:' && /^[a-z0-9]+\.supabase\.co$/.test(url.hostname) &&
-        url.origin === this.url && publicKey && this.key.length > 20;
-    } catch { return false; }
+      return (
+        url.protocol === 'https:' &&
+        /^[a-z0-9]+\.supabase\.co$/.test(url.hostname) &&
+        url.origin === this.url &&
+        chavePublica &&
+        this.chave.length > 20
+      );
+    } catch {
+      return false;
+    }
   }
-
-  headers(auth = true) {
-    const headers = { 'apikey': this.key, 'Content-Type': 'application/json' };
-    if (auth && this.session?.access_token) headers.Authorization = `Bearer ${this.session.access_token}`;
+  cabecalhos(auth = true) {
+    const headers = {
+      apikey: this.chave,
+      'Content-Type': 'application/json'
+    };
+    if (auth && this.sessao?.access_token)
+      headers.Authorization = `Bearer ${this.sessao.access_token}`;
     return headers;
   }
-
-  async request(path, { method = 'GET', body, auth = true, prefer, retry = true, headers = {} } = {}) {
-    const reqHeaders = { ...this.headers(auth), ...headers };
-    if (prefer) reqHeaders.Prefer = prefer;
-    let response;
-    try {
-      response = await fetch(`${this.url}${path}`, { method, headers: reqHeaders, body: body === undefined ? undefined : JSON.stringify(body) });
-    } catch (cause) {
-      throw new Error('Não foi possível acessar o Supabase. Confira a internet, a URL e a configuração.', { cause });
-    }
-    if (response.status === 401 && auth && retry && this.session?.refresh_token) {
-      await this.refreshSession();
-      return this.request(path, { method, body, auth, prefer, retry: false, headers });
-    }
-    const text = await response.text();
-    let data;
-    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-    if (!response.ok) {
-      const message = data?.msg || data?.message || data?.error_description || data?.error || `Erro ${response.status}`;
-      throw new Error(message);
-    }
-    return data;
-  }
-
-  storeSession(data) {
-    if (!data?.access_token) throw new Error('O Supabase não retornou uma sessão válida.');
-    this.session = {
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      expires_at: Number(data.expires_at) || Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
-      user: data.user || this.session?.user || null
+  async pedir(
+    path,
+    { method = 'GET', body, auth = true, prefer, retry = true, headers = {} } = {}
+  ) {
+    const cabecalhos = {
+      ...this.cabecalhos(auth),
+      ...headers
     };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(this.session));
-  }
-
-  async restoreSession() {
+    if (prefer) cabecalhos.Prefer = prefer;
+    let resposta;
     try {
-      const fragment = new URLSearchParams(globalThis.location?.hash?.slice(1) || '');
-      if (fragment.has('access_token') && fragment.has('refresh_token')) {
-        this.storeSession(Object.fromEntries(fragment));
+      resposta = await fetch(`${this.url}${path}`, {
+        method,
+        headers: cabecalhos,
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+    } catch (causa) {
+      throw new Error(
+        'Não foi possível acessar o Supabase. Confira a internet, a URL e a configuração.',
+        {
+          cause: causa
+        }
+      );
+    }
+    if (resposta.status === 401 && auth && retry && this.sessao?.refresh_token) {
+      await this.renovarSessao();
+      return this.pedir(path, {
+        method,
+        body,
+        auth,
+        prefer,
+        retry: false,
+        headers
+      });
+    }
+    const texto = await resposta.text();
+    let dados;
+    try {
+      dados = texto ? JSON.parse(texto) : null;
+    } catch {
+      dados = texto;
+    }
+    if (!resposta.ok) {
+      const mensagem =
+        dados?.msg ||
+        dados?.message ||
+        dados?.error_description ||
+        dados?.error ||
+        `Erro ${resposta.status}`;
+      throw new Error(mensagem);
+    }
+    return dados;
+  }
+  guardarSessao(dados) {
+    if (!dados?.access_token) throw new Error('O Supabase não retornou uma sessão válida.');
+    this.sessao = {
+      access_token: dados.access_token,
+      refresh_token: dados.refresh_token,
+      expires_at:
+        Number(dados.expires_at) ||
+        Math.floor(Date.now() / 1000) + (Number(dados.expires_in) || 3600),
+      user: dados.user || this.sessao?.user || null
+    };
+    localStorage.setItem(CHAVE_SESSAO, JSON.stringify(this.sessao));
+  }
+  async restaurarSessao() {
+    try {
+      const fragmento = new URLSearchParams(globalThis.location?.hash?.slice(1) || '');
+      if (fragmento.has('access_token') && fragmento.has('refresh_token')) {
+        this.guardarSessao(Object.fromEntries(fragmento));
         history.replaceState(null, '', location.pathname + location.search);
       }
-      this.session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
-      if (!this.session?.access_token) return null;
-      if ((this.session.expires_at || 0) < Date.now() / 1000 + 60) await this.refreshSession();
-      const user = await this.request('/auth/v1/user');
-      if (!user?.id) throw new Error('Sessão inválida');
-      this.session.user = user;
-      localStorage.setItem(SESSION_KEY, JSON.stringify(this.session));
-      return user;
+      this.sessao = JSON.parse(localStorage.getItem(CHAVE_SESSAO) || 'null');
+      if (!this.sessao?.access_token) return null;
+      if ((this.sessao.expires_at || 0) < Date.now() / 1000 + 60) await this.renovarSessao();
+      const usuario = await this.pedir('/auth/v1/user');
+      if (!usuario?.id) throw new Error('Sessão inválida');
+      this.sessao.user = usuario;
+      localStorage.setItem(CHAVE_SESSAO, JSON.stringify(this.sessao));
+      return usuario;
     } catch {
-      this.clearSession();
+      this.limparSessao();
       return null;
     }
   }
-
-  async refreshSession() {
-    if (this.refreshing) return this.refreshing;
-    if (!this.session?.refresh_token) throw new Error('Sua sessão expirou. Entre novamente.');
-    this.refreshing = (async () => {
-      const data = await this.request('/auth/v1/token?grant_type=refresh_token', {
-        method: 'POST', auth: false, body: { refresh_token: this.session.refresh_token }
+  async renovarSessao() {
+    if (this.renovando) return this.renovando;
+    if (!this.sessao?.refresh_token) throw new Error('Sua sessão expirou. Entre novamente.');
+    this.renovando = (async () => {
+      const dados = await this.pedir('/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        auth: false,
+        body: {
+          refresh_token: this.sessao.refresh_token
+        }
       });
-      this.storeSession(data);
-      return this.session;
+      this.guardarSessao(dados);
+      return this.sessao;
     })();
-    try { return await this.refreshing; } finally { this.refreshing = null; }
+    try {
+      return await this.renovando;
+    } finally {
+      this.renovando = null;
+    }
   }
-
-  async signIn(email, password) {
-    const data = await this.request('/auth/v1/token?grant_type=password', {
-      method: 'POST', auth: false, body: { email, password }
+  async entrar(email, senha) {
+    const dados = await this.pedir('/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      auth: false,
+      body: {
+        email,
+        password: senha
+      }
     });
-    this.storeSession(data);
-    return this.session.user;
+    this.guardarSessao(dados);
+    return this.sessao.user;
   }
-
-  async signUp(email, password) {
+  async cadastrar(email, senha) {
     const redirect = globalThis.location ? location.origin + location.pathname : '';
-    const path = '/auth/v1/signup' + (redirect ? '?redirect_to=' + encodeURIComponent(redirect) : '');
-    const data = await this.request(path, {
-      method: 'POST', auth: false, body: { email, password }
+    const path =
+      '/auth/v1/signup' + (redirect ? '?redirect_to=' + encodeURIComponent(redirect) : '');
+    const dados = await this.pedir(path, {
+      method: 'POST',
+      auth: false,
+      body: {
+        email,
+        password: senha
+      }
     });
-    if (data?.access_token) this.storeSession(data);
-    return { signedIn: !!data?.access_token };
+    if (dados?.access_token) this.guardarSessao(dados);
+    return {
+      signedIn: !!dados?.access_token
+    };
   }
-
-  async signOut() {
-    try { await this.request('/auth/v1/logout', { method: 'POST' }); } catch { /* remove a sessão local mesmo sem conexão */ }
-    this.clearSession();
-  }
-
-  clearSession() {
-    this.session = null;
-    localStorage.removeItem(SESSION_KEY);
-  }
-
-  get userId() { return this.session?.user?.id; }
-  get email() { return this.session?.user?.email || ''; }
-
-  async selectAll(table, orderBy = 'created_at') {
-    const output = [];
-    for (let from = 0; ; from += 1000) {
-      const order = encodeURIComponent(`${orderBy}.asc`);
-      const part = await this.request(`/rest/v1/${table}?select=*&order=${order}`, {
-        headers: { Range: `${from}-${from + 999}`, 'Range-Unit': 'items' }
+  async sair() {
+    try {
+      await this.pedir('/auth/v1/logout', {
+        method: 'POST'
       });
-      if (!Array.isArray(part)) throw new Error('Resposta inesperada do banco de dados.');
-      output.push(...part);
-      if (part.length < 1000) break;
+    } catch {}
+    this.limparSessao();
+  }
+  limparSessao() {
+    this.sessao = null;
+    localStorage.removeItem(CHAVE_SESSAO);
+  }
+  get usuarioId() {
+    return this.sessao?.user?.id;
+  }
+  get email() {
+    return this.sessao?.user?.email || '';
+  }
+  async listar(tabela, ordem = 'created_at') {
+    const lista = [];
+    for (let inicio = 0; ; inicio += 1000) {
+      const ordenacao = encodeURIComponent(`${ordem}.asc`);
+      const parte = await this.pedir(`/rest/v1/${tabela}?select=*&order=${ordenacao}`, {
+        headers: {
+          Range: `${inicio}-${inicio + 999}`,
+          'Range-Unit': 'items'
+        }
+      });
+      if (!Array.isArray(parte)) throw new Error('Resposta inesperada do banco de dados.');
+      lista.push(...parte);
+      if (parte.length < 1000) break;
     }
-    return output;
+    return lista;
   }
-
-  async insert(table, row) {
-    const data = await this.request(`/rest/v1/${table}?select=*`, {
-      method: 'POST', body: row, prefer: 'return=representation'
+  async inserir(tabela, registro) {
+    const dados = await this.pedir(`/rest/v1/${tabela}?select=*`, {
+      method: 'POST',
+      body: registro,
+      prefer: 'return=representation'
     });
-    return data?.[0];
+    return dados?.[0];
   }
-
-  async insertMany(table, rows) {
-    if (!rows.length) return;
-    for (let i = 0; i < rows.length; i += 300) {
-      await this.request(`/rest/v1/${table}`, { method: 'POST', body: rows.slice(i, i + 300) });
+  async inserirVarios(tabela, registros) {
+    if (!registros.length) return;
+    for (let i = 0; i < registros.length; i += 300) {
+      await this.pedir(`/rest/v1/${tabela}`, {
+        method: 'POST',
+        body: registros.slice(i, i + 300)
+      });
     }
   }
-
-  async update(table, id, row) {
-    const data = await this.request(`/rest/v1/${table}?id=eq.${encodeURIComponent(id)}&select=*`, {
-      method: 'PATCH', body: row, prefer: 'return=representation'
+  async alterar(tabela, id, registro) {
+    const dados = await this.pedir(`/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&select=*`, {
+      method: 'PATCH',
+      body: registro,
+      prefer: 'return=representation'
     });
-    if (!data?.length) throw new Error('Registro não encontrado ou acesso negado.');
-    return data[0];
+    if (!dados?.length) throw new Error('Registro não encontrado ou acesso negado.');
+    return dados[0];
   }
-
-  async remove(table, id) {
-    const data = await this.request(`/rest/v1/${table}?id=eq.${encodeURIComponent(id)}&select=id`, {
-      method: 'DELETE', prefer: 'return=representation'
+  async excluir(tabela, id) {
+    const dados = await this.pedir(`/rest/v1/${tabela}?id=eq.${encodeURIComponent(id)}&select=id`, {
+      method: 'DELETE',
+      prefer: 'return=representation'
     });
-    if (!data?.length) throw new Error('Registro não encontrado ou acesso negado.');
+    if (!dados?.length) throw new Error('Registro não encontrado ou acesso negado.');
   }
-
-  async saveSettings(tariff, options = {}) {
-    if (!this.userId) throw new Error('É necessário entrar na conta.');
-    const row = { user_id: this.userId, tariff, ...options };
-    await this.request('/rest/v1/sw_settings?on_conflict=user_id', {
-      method: 'POST', body: row, prefer: 'resolution=merge-duplicates,return=minimal'
+  async salvarTarifa(tariff, options = {}) {
+    if (!this.usuarioId) throw new Error('É necessário entrar na conta.');
+    const registro = {
+      user_id: this.usuarioId,
+      tariff,
+      ...options
+    };
+    await this.pedir('/rest/v1/sw_settings?on_conflict=user_id', {
+      method: 'POST',
+      body: registro,
+      prefer: 'resolution=merge-duplicates,return=minimal'
     });
   }
 }

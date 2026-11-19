@@ -1,7 +1,3 @@
--- SmartWatts | Migração para executar no SQL Editor do projeto Supabase.
--- Tabelas isoladas (prefixo sw_) e segurança por usuário (RLS).
--- Reexecutar este script é seguro para um projeto sem conflito de nomes.
-
 create table if not exists public.sw_settings (
     user_id uuid primary key references auth.users(id) on delete cascade,
     tariff numeric(10,4) not null default 0.8900 check (tariff > 0 and tariff <= 100),
@@ -43,7 +39,6 @@ alter table public.sw_settings enable row level security;
 alter table public.sw_locations enable row level security;
 alter table public.sw_readings enable row level security;
 
--- Autenticação e autorização: cada usuário vê/modifica apenas os próprios dados.
 drop policy if exists sw_settings_owner on public.sw_settings;
 create policy sw_settings_owner on public.sw_settings for all to authenticated
 using ((select auth.uid()) = user_id)
@@ -63,7 +58,6 @@ grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.sw_settings to authenticated;
 grant select, insert, update, delete on public.sw_locations to authenticated;
 grant select, insert, update, delete on public.sw_readings to authenticated;
--- Sem privilégios de leitura ou escrita para visitantes não autenticados.
 revoke all on public.sw_settings from anon;
 revoke all on public.sw_locations from anon;
 revoke all on public.sw_readings from anon;
